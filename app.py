@@ -523,12 +523,33 @@ def download_gdrive_dataset(file_id: str, dest_name: str) -> Optional[Path]:
     dest = DATA_DIR / dest_name
     if dest.exists():
         return dest
-    try:
-        result = gdown.download(id=file_id, output=str(dest), quiet=False, fuzzy=True)
-        return Path(result) if result else None
-    except Exception as e:
-        st.sidebar.error(f"Google Drive download failed: {e}")
-        return None
+
+    url = f"https://drive.google.com/uc?id={file_id}"
+    errors = []
+
+    # gdown's signature has drifted across versions (fuzzy=, id= support
+    # varies), so try a few call styles rather than pinning to one.
+    attempts = [
+        lambda: gdown.download(url=url, output=str(dest), quiet=False),
+        lambda: gdown.download(id=file_id, output=str(dest), quiet=False),
+        lambda: gdown.download(url=url, output=str(dest), quiet=False, fuzzy=True),
+    ]
+    for attempt in attempts:
+        try:
+            result = attempt()
+            if result:
+                return Path(result)
+        except TypeError as e:
+            errors.append(str(e))
+            continue
+        except Exception as e:
+            errors.append(str(e))
+            break
+
+    st.sidebar.error(
+        "Google Drive download failed: " + (errors[-1] if errors else "unknown error")
+    )
+    return None
 
 
 # ---- Sidebar: configuration ----
