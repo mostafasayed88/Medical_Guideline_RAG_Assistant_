@@ -31,6 +31,22 @@ from pypdf import PdfReader
 from rank_bm25 import BM25Okapi
 
 # ============================================================
+# Defaults: bundled dataset + API key
+# ============================================================
+# NOTE ON THE API KEY: this is hardcoded as a fallback so the app works
+# without extra setup, per request. If this repo is ever made public (e.g.
+# pushed to GitHub for Streamlit Community Cloud), anyone can read this key
+# straight out of the source. Before that happens, move it to Streamlit
+# secrets instead: Settings -> Secrets -> OPENROUTER_API_KEY = "...", then
+# delete the string below (the sidebar already checks secrets first).
+DEFAULT_OPENROUTER_API_KEY = "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"
+
+# Google Drive file to auto-download as the default dataset PDF.
+# https://drive.google.com/file/d/1VssbZvccf4KPr4gScXxjqDcL93WAMVEg/view?usp=drive_link
+GDRIVE_DATASET_FILE_ID = "1VssbZvccf4KPr4gScXxjqDcL93WAMVEg"
+GDRIVE_DATASET_FILENAME = "gdrive_dataset.pdf"
+
+# ============================================================
 # 0. Config
 # ============================================================
 
@@ -498,6 +514,23 @@ st.markdown(
 DATA_DIR = Path(__file__).parent / "data"
 DATA_DIR.mkdir(exist_ok=True)
 
+
+@st.cache_resource(show_spinner="Downloading dataset from Google Drive...")
+def download_gdrive_dataset(file_id: str, dest_name: str) -> Optional[Path]:
+    """Downloads the configured Google Drive file into data/ once, then reuses it."""
+    import gdown
+
+    dest = DATA_DIR / dest_name
+    if dest.exists():
+        return dest
+    try:
+        result = gdown.download(id=file_id, output=str(dest), quiet=False, fuzzy=True)
+        return Path(result) if result else None
+    except Exception as e:
+        st.sidebar.error(f"Google Drive download failed: {e}")
+        return None
+
+
 # ---- Sidebar: configuration ----
 
 with st.sidebar:
@@ -505,16 +538,25 @@ with st.sidebar:
     st.caption("Evidence-based Clinical Intelligence")
 
     st.subheader("1. API key")
-    default_key = st.secrets.get("OPENROUTER_API_KEY", "")
+    default_key = st.secrets.get("OPENROUTER_API_KEY", DEFAULT_OPENROUTER_API_KEY)
     api_key = st.text_input(
         "OpenRouter API key",
         value=default_key,
         type="password",
-        help="Stored only for this session. Prefer setting it in Streamlit secrets "
-             "as OPENROUTER_API_KEY so you don't have to paste it every time.",
+        help="Stored only for this session. A default key is baked into app.py for "
+             "convenience — move it to Streamlit secrets (OPENROUTER_API_KEY) and "
+             "remove it from source before this repo is public.",
     )
 
     st.subheader("2. Source PDFs")
+
+    if st.button("📥 Load bundled dataset from Google Drive", use_container_width=True):
+        download_gdrive_dataset.clear()
+        download_gdrive_dataset(GDRIVE_DATASET_FILE_ID, GDRIVE_DATASET_FILENAME)
+
+    # Auto-download once on first run so the app is usable with zero clicks.
+    download_gdrive_dataset(GDRIVE_DATASET_FILE_ID, GDRIVE_DATASET_FILENAME)
+
     bundled_pdfs = sorted(DATA_DIR.glob("*.pdf"))
     if bundled_pdfs:
         st.caption(f"Found {len(bundled_pdfs)} PDF(s) already in data/:")
@@ -522,7 +564,7 @@ with st.sidebar:
             st.caption(f"• {p.name}")
 
     uploaded_files = st.file_uploader(
-        "Upload guideline PDF(s)", type=["pdf"], accept_multiple_files=True,
+        "Upload additional guideline PDF(s)", type=["pdf"], accept_multiple_files=True,
     )
 
     with st.expander("3. Retrieval settings", expanded=False):
